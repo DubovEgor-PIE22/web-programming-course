@@ -1,94 +1,41 @@
-import fs from 'node:fs';
-import path from 'node:path';
-import Database from 'better-sqlite3';
+import fs from "node:fs";
+import path from "node:path";
 
-const dbFile = process.env.DB_FILE ?? './data/todo.sqlite';
-const resolvedDbFile = path.resolve(process.cwd(), dbFile);
+const dbFile = path.resolve(process.cwd(), process.env.DB_FILE ?? "./data/todo.json");
+fs.mkdirSync(path.dirname(dbFile), { recursive: true });
+if (!fs.existsSync(dbFile)) fs.writeFileSync(dbFile, JSON.stringify({ todos: [], seq: 0 }));
 
-fs.mkdirSync(path.dirname(resolvedDbFile), { recursive: true });
+export type Todo = { id: number; title: string; done: boolean; createdAt: string; updatedAt: string };
+type Store = { todos: Todo[]; seq: number };
 
-const db = new Database(resolvedDbFile);
-db.pragma('journal_mode = WAL');
+const read = (): Store => JSON.parse(fs.readFileSync(dbFile, "utf8"));
+const write = (s: Store) => fs.writeFileSync(dbFile, JSON.stringify(s, null, 2));
 
-db.exec(`
-CREATE TABLE IF NOT EXISTS todos (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  title TEXT NOT NULL,
-  done INTEGER NOT NULL DEFAULT 0,
-  created_at TEXT NOT NULL DEFAULT (datetime('now')),
-  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
-`);
+export const listTodos = (): Todo[] => read().todos.slice().reverse();
 
-type TodoRow = {
-  id: number;
-  title: string;
-  done: number;
-  created_at: string;
-  updated_at: string;
-};
-
-export type Todo = {
-  id: number;
-  title: string;
-  done: boolean;
-  createdAt: string;
-  updatedAt: string;
-};
-
-const mapRow = (row: TodoRow): Todo => ({
-  id: row.id,
-  title: row.title,
-  done: row.done === 1,
-  createdAt: row.created_at,
-  updatedAt: row.updated_at,
-});
-
-export const listTodos = (): Todo[] => {
-  const rows = db
-    .prepare('SELECT id, title, done, created_at, updated_at FROM todos ORDER BY id DESC')
-    .all() as TodoRow[];
-  return rows.map(mapRow);
-};
-
-export const getTodo = (id: number): Todo | null => {
-  const row = db
-    .prepare('SELECT id, title, done, created_at, updated_at FROM todos WHERE id = ?')
-    .get(id) as TodoRow | undefined;
-
-  return row ? mapRow(row) : null;
-};
+export const getTodo = (id: number): Todo | null => read().todos.find((t) => t.id === id) ?? null;
 
 export const createTodo = (title: string): Todo => {
-  const result = db
-    .prepare(
-      `INSERT INTO todos (title, done, created_at, updated_at)
-       VALUES (?, 0, datetime('now'), datetime('now'))`
-    )
-    .run(title.trim());
-
-  return getTodo(Number(result.lastInsertRowid)) as Todo;
+  const s = read();
+  const todo: Todo = { id: ++s.seq, title: title.trim(), done: false, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+  s.todos.push(todo);
+  write(s);
+  return todo;
 };
 
 export const updateTodo = (id: number, patch: { title?: string; done?: boolean }): Todo | null => {
-  const current = getTodo(id);
-  if (!current) {
-    return null;
-  }
-
-  const nextTitle = patch.title !== undefined ? patch.title.trim() : current.title;
-  const nextDone = patch.done !== undefined ? (patch.done ? 1 : 0) : current.done ? 1 : 0;
-
-  db.prepare(
-    `UPDATE todos
-     SET title = ?, done = ?, updated_at = datetime('now')
-     WHERE id = ?`
-  ).run(nextTitle, nextDone, id);
-
-  return getTodo(id);
+  const s = read();
+  const i = s.todos.findIndex((t) => t.id === id);
+  if (i === -1) return null;
+  s.todos[i] = { ...s.todos[i], ...patch, updatedAt: new Date().toISOString() };
+  write(s);
+  return s.todos[i];
 };
 
 export const deleteTodo = (id: number): boolean => {
-  const result = db.prepare('DELETE FROM todos WHERE id = ?').run(id);
-  return result.changes > 0;
+  const s = read();
+  const before = s.todos.length;
+  s.todos = s.todos.filter((t) => t.id !== id);
+  write(s);
+  return s.todos.length < before;
 };
