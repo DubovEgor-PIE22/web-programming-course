@@ -1,0 +1,15 @@
+version: "3.9"
+
+# Run with: docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+services:
+  backend:
+    build:
+      target: builder        # stop at builder stage for hot-reload
+    command: npx tsx watch src/index.ts
+    volumes:
+      - ./src:/app/src:ro    # mount source for live reload
+    environment:
+      NODE_ENV: development
+    ports:
+      - "3000:3000"
+      - "9229:9229"          # debugger port
