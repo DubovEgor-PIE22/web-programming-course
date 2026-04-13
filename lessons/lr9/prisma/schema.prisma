@@ -1,0 +1,100 @@
+// prisma/schema.prisma
+// LR9: Quiz models with relationships and indexes
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// User (updated from LR8 — added role + sessions relation)
+// ─────────────────────────────────────────────────────────────────────────────
+model User {
+  id        String    @id @default(cuid())
+  email     String    @unique
+  name      String?
+  githubId  String    @unique
+  password  String?   // optional: used when not OAuth
+  role      String    @default("student") // "student" | "admin"
+  sessions  Session[]
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Category — группировка вопросов
+// ─────────────────────────────────────────────────────────────────────────────
+model Category {
+  id        String     @id @default(cuid())
+  name      String
+  slug      String     @unique
+  questions Question[]
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Question — вопрос квиза
+// correctAnswer хранит эталонный ответ в JSON:
+//   single-select:   { "value": "A" }
+//   multiple-select: { "values": ["A", "C"] }
+//   essay:           null  (проверяется вручную admin'ом)
+// ─────────────────────────────────────────────────────────────────────────────
+model Question {
+  id            String   @id @default(cuid())
+  text          String
+  type          String   // "single-select" | "multiple-select" | "essay"
+  categoryId    String
+  category      Category @relation(fields: [categoryId], references: [id])
+  correctAnswer String?  // JSON serialized (SQLite не поддерживает Json тип)
+  points        Int      @default(1)
+  answers       Answer[]
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Session — сессия прохождения квиза
+// ─────────────────────────────────────────────────────────────────────────────
+model Session {
+  id          String    @id @default(cuid())
+  userId      String
+  user        User      @relation(fields: [userId], references: [id])
+  status      String    @default("in_progress") // "in_progress" | "completed" | "expired"
+  score       Float?
+  startedAt   DateTime  @default(now())
+  expiresAt   DateTime
+  completedAt DateTime?
+  answers     Answer[]
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([userId])
+  @@index([status])
+  @@index([userId, status])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Answer — ответ студента на вопрос в рамках сессии
+// userAnswer хранит JSON: { "value": "A" } или { "values": ["A","B"] } или { "text": "..." }
+// ─────────────────────────────────────────────────────────────────────────────
+model Answer {
+  id         String   @id @default(cuid())
+  sessionId  String
+  session    Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  questionId String
+  question   Question @relation(fields: [questionId], references: [id])
+  userAnswer String   // JSON serialized
+  score      Float?   // null если essay и ещё не проверен
+  isCorrect  Boolean? // null для essay
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([sessionId, questionId]) // один ответ на вопрос в сессии
+  @@index([sessionId])
+  @@index([questionId])
+}
